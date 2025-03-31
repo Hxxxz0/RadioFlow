@@ -13,7 +13,7 @@ from typing import Optional, Sequence, Union
 import math 
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 from monai.networks.blocks import Convolution, UpSample
 from monai.networks.layers.factories import Conv, Pool
 from monai.utils import deprecated_arg, ensure_tuple_rep
@@ -47,7 +47,68 @@ def nonlinearity(x):
     return x*torch.sigmoid(x)
 
 
+# 通道注意力模块
+class ChannelAttention(nn.Module):
+    def __init__(self, in_channels, reduction=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)  # 全局平均池化
+        self.max_pool = nn.AdaptiveMaxPool2d(1)  # 全局最大池化
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels // reduction, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(in_channels // reduction, in_channels, 1, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = self.fc(self.avg_pool(x))  # 平均池化后通过FC
+        max_out = self.fc(self.max_pool(x))  # 最大池化后通过FC
+        out = avg_out + max_out  # 融合两种池化结果
+        return self.sigmoid(out)  # 输出注意力权重
+
+# 空间注意力模块
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)  # 通道平均
+        max_out, _ = torch.max(x, dim=1, keepdim=True)  # 通道最大值
+        out = torch.cat([avg_out, max_out], dim=1)  # 拼接
+        out = self.conv(out)  # 卷积生成空间注意力图
+        return self.sigmoid(out)  # 输出注意力权重
+
+# 改进的CrossAttention模块
 class CrossAttention(nn.Module):
+    def __init__(self, in_channels, embedding_channels, reduction=16, kernel_size=7):
+        super(CrossAttention, self).__init__()
+        self.channel_attention = ChannelAttention(in_channels, reduction)
+        self.spatial_attention = SpatialAttention(kernel_size)
+        self.embedding_proj = nn.Conv2d(embedding_channels, in_channels, 1)  # 投影嵌入特征
+
+    def forward(self, x, embedding):
+        # 将嵌入特征投影到与特征图相同的通道数
+        embedding_proj = self.embedding_proj(embedding)
+        
+        # 应用通道注意力
+        ca = self.channel_attention(x)
+        x_ca = x * ca  # 加权特征图
+        
+        # 应用空间注意力
+        sa = self.spatial_attention(x)
+        x_sa = x * sa  # 加权特征图
+        
+        # 结合通道和空间注意力
+        x_attn = x_ca + x_sa
+        
+        # 与投影后的嵌入特征融合
+        fused = x_attn + embedding_proj
+        
+        return fused
+
+class CrossAttention_old(nn.Module):
     """Cross-attention module for interaction between feature maps and embeddings"""
     def __init__(self, dim, num_heads=8, head_dim=None, dropout=0.0, downsample_factor=4):
         """
@@ -504,11 +565,11 @@ class BasicUNetDe(nn.Module):
         
         # If using cross-attention, create cross-attention modules for each layer
         if self.use_cross_attention:
-            self.cross_attn_0 = CrossAttention(fea[0], num_heads=attention_heads, dropout=dropout, downsample_factor=attention_downsample)
-            self.cross_attn_1 = CrossAttention(fea[1], num_heads=attention_heads, dropout=dropout, downsample_factor=attention_downsample)
-            self.cross_attn_2 = CrossAttention(fea[2], num_heads=attention_heads, dropout=dropout, downsample_factor=attention_downsample)
-            self.cross_attn_3 = CrossAttention(fea[3], num_heads=attention_heads, dropout=dropout, downsample_factor=attention_downsample)
-            self.cross_attn_4 = CrossAttention(fea[4], num_heads=attention_heads, dropout=dropout, downsample_factor=attention_downsample)
+            self.cross_attn_0 = CrossAttention(fea[0], fea[0], reduction=16, kernel_size=7)
+            self.cross_attn_1 = CrossAttention(fea[1], fea[1], reduction=16, kernel_size=7)
+            self.cross_attn_2 = CrossAttention(fea[2], fea[2], reduction=16, kernel_size=7)
+            self.cross_attn_3 = CrossAttention(fea[3], fea[3], reduction=16, kernel_size=7)
+            self.cross_attn_4 = CrossAttention(fea[4], fea[4], reduction=16, kernel_size=7)
 
     def forward(self, x: torch.Tensor, t, embeddings=None, image=None):
         """
