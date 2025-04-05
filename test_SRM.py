@@ -14,29 +14,76 @@ import torchdiffeq
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-import argparse
 import glob
-import shutil
-from PIL import Image
+from torchmetrics.functional import structural_similarity_index_measure as ssim_fn
+from skimage.metrics import structural_similarity as sk_ssim
+
 from data_loaders import loaders
 from model.model import DiffUNet
 from torchvision import datasets, transforms
 from torchvision.transforms import ToPILImage
 from torchvision.utils import make_grid
-from torchdyn.core import NeuralODE
-from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 
+#########################
+# 定义 SSIM 计算函数
+#########################
+def gaussian(window_size, sigma):
+    """生成一维高斯核"""
+    gauss = torch.Tensor([math.exp(-(x - window_size//2)**2 / float(2 * sigma**2)) for x in range(window_size)])
+    return gauss / gauss.sum()
+
+def create_window(window_size, channel):
+    """生成二维高斯核窗口，用于 SSIM 计算"""
+    _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
+    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
+    window = _2D_window.expand(channel, 1, window_size, window_size).contiguous()
+    return window
+
+def _ssim(img1, img2, window, window_size, channel, size_average=True):
+    """内部使用的 SSIM 计算函数"""
+    mu1 = F.conv2d(img1, window, padding=window_size//2, groups=channel)
+    mu2 = F.conv2d(img2, window, padding=window_size//2, groups=channel)
+
+    mu1_sq = mu1 * mu1
+    mu2_sq = mu2 * mu2
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = F.conv2d(img1 * img1, window, padding=window_size//2, groups=channel) - mu1_sq
+    sigma2_sq = F.conv2d(img2 * img2, window, padding=window_size//2, groups=channel) - mu2_sq
+    sigma12 = F.conv2d(img1 * img2, window, padding=window_size//2, groups=channel) - mu1_mu2
+
+    C1 = 0.01**2
+    C2 = 0.03**2
+
+    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+
+    if size_average:
+        return ssim_map.mean()
+    else:
+        return ssim_map.mean(1).mean(1).mean(1)
+
+def ssim(img1, img2, window_size=11, size_average=True):
+    """
+    计算图像 SSIM 值，输入张量形状为 (N, C, H, W)，要求图像取值范围在 [0, 1] 内
+    """
+    (_, channel, _, _) = img1.size()
+    window = create_window(window_size, channel).to(img1.device)
+    return _ssim(img1, img2, window, window_size, channel, size_average)
+
+#########################
+# 评估函数
+#########################
 def evaluate_val(model, val_loader, device, use_torch_diffeq=True):
     """
-    Traverse the entire Radio_val dataset, using torchdiffq for each batch or calling the model directly to get the prediction (take the last time step),
-And calculate MSE, NMSE, MAE and PSNR evaluation indicators.
+    遍历整个 Radio_val 数据集，对每个批次采用 torchdiffeq 或直接调用模型得到预测（取最后一个时间步骤），
+    并计算 MSE、NMSE、MAE、PSNR、RMSE 和 SSIM 评估指标。
     """
     model.eval()
     metrics = defaultdict(float)
     total_samples = 0
 
     # 确保保存图像的目录存在
-    fig_dir = "fig"
+    fig_dir = "fig_DRM"
     os.makedirs(fig_dir, exist_ok=True)
 
     with torch.no_grad():
@@ -74,21 +121,31 @@ And calculate MSE, NMSE, MAE and PSNR evaluation indicators.
             mse_val = mse_loss.item()
             psnr = 20 * np.log10(1.0 / np.sqrt(mse_val)) if mse_val > 0 else float("inf")
 
+            # 新增 RMSE 和 SSIM 计算
+            rmse_loss = torch.sqrt(mse_loss)
+            ssim_val = ssim(pred, targets, window_size=11, size_average=True)
+
+            # 累加各个指标
             metrics["MSE"] += mse_loss.item() * batch_size
             metrics["NMSE"] += (nmse_loss.item() if isinstance(nmse_loss, torch.Tensor) else nmse_loss) * batch_size
             metrics["MAE"] += mae_loss.item() * batch_size
             metrics["PSNR"] += psnr * batch_size
+            metrics["RMSE"] += rmse_loss.item() * batch_size
+            metrics["SSIM"] += ssim_val.item() * batch_size
+
             print(f"Batch {idx} -- PSNR: {psnr:.4f}")
             print(f"Batch {idx} -- NMSE: {nmse_loss}")
+            print(f"Batch {idx} -- RMSE: {rmse_loss.item():.4f}")
+            print(f"Batch {idx} -- SSIM: {ssim_val.item():.4f}")
 
-            # 绘制并保存当前批次的预测图
+            
             numpy_array = pred.cpu().numpy().squeeze(1)  # shape: (batch_size, H, W)
             num_images = numpy_array.shape[0]
             rows = int(math.ceil(math.sqrt(num_images)))
             cols = int(math.ceil(num_images / rows))
 
             fig, axes = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
-            # 如果只有一行或一列，保证 axes 是二维数组
+            
             if rows == 1 or cols == 1:
                 axes = np.array(axes).reshape(rows, cols)
 
@@ -96,7 +153,7 @@ And calculate MSE, NMSE, MAE and PSNR evaluation indicators.
             for i in range(rows):
                 for j in range(cols):
                     if index < num_images:
-                        axes[i, j].imshow(numpy_array[index])
+                        axes[i, j].imshow(numpy_array[index], cmap='gray')
                         axes[i, j].axis('off')
                         index += 1
                     else:
@@ -109,233 +166,126 @@ And calculate MSE, NMSE, MAE and PSNR evaluation indicators.
     averaged_metrics = {k: v / total_samples for k, v in metrics.items()}
     return averaged_metrics
 
-def run_trajectory_inference(model, image, steps=100, x_t=None, device=None):
-    # Ensure image directory exists for saving images
-    os.makedirs("val_result", exist_ok=True)
-    os.makedirs("val_result/Trajectory", exist_ok=True)
-
-    conditioner = image.to(device)  # Use original image for conditioning
-    # Initial noise (can be random or provided)
-    if x_t is None:
-        x_t = torch.randn((1, 1, image.shape[2], image.shape[3])).to(device)
-    
-    def ode_func(t, x):
-        """Vector field function for the ODE solver."""
-        with torch.no_grad():
-            # Convert scalar t to tensor with batch dimension 
-            t_tensor = torch.ones((x.shape[0],), device=device) * t
-            
-            # Use torchdiffeq.odeint for trajectory integration, calling in the same way as in the Trainer
-            score = model(image=conditioner, x=x, pred_type="denoise", step=t_tensor)
-            return score
-    
-    trajectory = []
-    t_span = torch.linspace(0, 1.0, steps).to(device)
-    
-    # Record start time
-    start_time = time.time()
-    
-    # Solve ODE to get trajectory
-    solution = torchdiffeq.odeint(
-        ode_func, 
-        x_t.reshape(1, -1), 
-        t_span,
-        method='dopri5',
-        atol=1e-4,
-        rtol=1e-4,
-    )
-    
-    # Get the last time step as prediction result
-    solution = solution.reshape(steps, 1, 1, image.shape[2], image.shape[3])
-    trajectory = solution.detach().cpu()  # Store full trajectory for visualization
-    
-    end_time = time.time()
-    print(f"Inference time: {end_time - start_time:.2f}s")
-    
-    return trajectory
-
-def calculate_metrics(pred, target):
-    # Avoid division by zero
-    epsilon = 1e-10
-    
-    # Convert tensors to numpy arrays
-    pred_np = pred.detach().cpu().numpy()
-    target_np = target.detach().cpu().numpy()
-    
-    # Calculate MSE
-    mse = np.mean((pred_np - target_np) ** 2)
-    
-    # Calculate PSNR
-    max_i = 1.0  # Assuming normalized to [0, 1]
-    psnr = 20 * np.log10(max_i / (np.sqrt(mse) + epsilon))
-    
-    return mse, psnr
-
-def plot_trajectory(trajectory, inputs, targets, save_path, n_steps_display=10):
-    # Plot and save current batch predictions
-    trajectory_numpy = trajectory.numpy()
-    inputs_numpy = inputs.detach().cpu().numpy()
-    targets_numpy = targets.detach().cpu().numpy()
-    
-    n_samples = trajectory_numpy.shape[1]
-    
-    # If there's only one row or one column, ensure axes is a 2D array
-    fig, axes = plt.subplots(n_samples, n_steps_display + 2, figsize=(3 * (n_steps_display + 2), 3 * n_samples))
-    
-    if n_samples == 1:
-        axes = axes.reshape(1, -1)
-    
-    display_indices = np.linspace(0, trajectory_numpy.shape[0] - 1, n_steps_display, dtype=int)
-    
-    for i in range(n_samples):
-        # Plot input
-        axes[i, 0].imshow(inputs_numpy[i, 0], cmap='gray')
-        axes[i, 0].set_title("Input")
-        axes[i, 0].axis('off')
-        
-        # Plot trajectory steps
-        for j, idx in enumerate(display_indices):
-            axes[i, j + 1].imshow(trajectory_numpy[idx, i, 0], cmap='gray')
-            axes[i, j + 1].set_title(f"Step {idx}")
-            axes[i, j + 1].axis('off')
-        
-        # Plot target and final prediction
-        axes[i, -1].imshow(targets_numpy[i, 0], cmap='gray')
-        axes[i, -1].set_title("Target")
-        axes[i, -1].axis('off')
-    
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    print(f"Saved trajectory plot to {save_path}")
-
 def main():
-    # Directory for saving model and results
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    save_dir = os.path.join(base_dir, "checkpoints", "test_output")
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Data loading (make sure dataset paths are correct)
-    data_root_1 = os.path.join(base_dir, "data_loaders/MR2CT/test")
-    val_radiomic = loaders.Dataset_PairedImages_NoLabel(data_root_1)
-    
-    # Here we choose to use the test dataset for evaluation, can change to val if needed
-    val_dataset = val_radiomic
-    print(f"Validation samples: {len(val_dataset)}")
-    
-    # Create a data loader for validation
-    batch_size = 1  # For visualization clarity
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,  # To ensure evaluation order, set shuffle=False
-        num_workers=4
+
+    # 数据加载（请确保数据集路径正确）
+    dataset_path = "/home/user/dxc/motion/MedSegDiff/RadioUNet/RadioMapSeer/"
+    print(f"加载数据集: {dataset_path}")
+
+    try:
+      Radio_test   = loaders.RadioUNet_c(
+        phase="test",
+        dir_dataset="/home/user/dxc/motion/MedSegDiff/RadioUNet/RadioMapSeer/"
     )
+    except Exception as e:
+        print(f"加载数据集时出错: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+
+    batch_size = 16
     
-    # Device setup (modify device number as needed)
-    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    val_loader = torch.utils.data.DataLoader(Radio_test, batch_size=batch_size, shuffle=False, num_workers=0)
+
     
-    # Create lightweight model
-    model = DiffUNet(con_channels=1).to(device)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"使用设备: {device}")
+
     
-    # Check for pre-trained model, prioritize loading EMA model (if exists)
-    path_list = glob.glob('checkpoints/*/models/cfg_model_ema_best.pt')
-    if path_list:
-        # Sort by modification time (get the latest)
-        path_list.sort(key=os.path.getmtime, reverse=True)
-        ema_path = path_list[0]
-        print(f"Loading EMA model from: {ema_path}")
-        model.load_state_dict(torch.load(ema_path, map_location=device))
-    else:
-        # Try to load regular model if EMA not found
-        path_list = glob.glob('checkpoints/*/models/cfg_model_best.pt')
-        if path_list:
-            path_list.sort(key=os.path.getmtime, reverse=True)
-            model_path = path_list[0]
-            print(f"Loading model from: {model_path}")
-            model.load_state_dict(torch.load(model_path, map_location=device))
+    model = DiffUNet(con_channels=2)
+    model.to(device)
+
+    
+    use_ema = True
+    if use_ema:
+        ema_checkpoint_path = '/home/user/dxc/RadioFlow/checkpoints/cfm_ema/cfg_model_ema_step_15000.pt'
+        if os.path.exists(ema_checkpoint_path):
+            try:
+                state_dict = torch.load(ema_checkpoint_path, map_location=device)
+                model.load_state_dict(state_dict)
+                print(f"成功加载 EMA 模型: {ema_checkpoint_path}")
+            except Exception as e:
+                print(f"加载 EMA 模型失败: {e}")
+                traceback.print_exc()
+                print("将使用普通模型进行测试")
         else:
-            print("No pre-trained model found. Starting from scratch.")
+            print(f"EMA 模型文件不存在: {ema_checkpoint_path}. 将使用普通模型")
+    else:
+        checkpoint_path = '/home/user/dxc/radio/Diff-UNet/checkpoints/cfm_DRM_2/cfg_model_ema_step_285000.pt'
+        try:
+            if os.path.exists(checkpoint_path):
+                state_dict = torch.load(checkpoint_path, map_location=device)
+                model.load_state_dict(state_dict)
+                print(f"成功加载模型: {checkpoint_path}")
+            else:
+                print(f"模型文件不存在: {checkpoint_path}")
+                print("将使用未训练的模型继续")
+        except Exception as e:
+            print(f"无法加载模型: {e}")
+            traceback.print_exc()
+            print("将使用未训练的模型继续")
+
     
-    model.eval()
-    print(f"Model parameter count: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-    
-    # Sample for trajectory visualization
-    sample_inputs = []
-    sample_targets = []
-    
-    # Save model outputs for all validation samples
-    all_metrics = []
+    print("获取验证数据示例用于轨迹展示...")
+    try:
+        for batch in val_loader:
+            inputs, targets, _ = batch
+            break
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+        print(f"输入形状: {inputs.shape}, 目标形状: {targets.shape}")
+    except Exception as e:
+        print(f"获取数据时出错: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+
+    USE_TORCH_DIFFEQ = True
     with torch.no_grad():
-        for i, (inputs, targets, _) in enumerate(tqdm(val_loader, desc="Evaluation")):
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-            
-            # Save some samples for trajectory visualization
-            if i < 5 and i == 0:  # Save first 5 samples
-                sample_inputs.append(inputs.cpu())
-                sample_targets.append(targets.cpu())
-                
-                # Visualize trajectory for these samples
-                trajectory = run_trajectory_inference(model, inputs, steps=100, device=device)
-                
-                # Only take the last time step as final prediction result
-                pred = trajectory[-1]
-                
-                # Automatically calculate grid layout based on sample count
-                fig_path = os.path.join(save_dir, f"sample_{i}_trajectory.png")
-                plot_trajectory(trajectory, inputs.cpu(), targets.cpu(), fig_path)
-                
-                # Calculate metrics for this sample
-                mse, psnr = calculate_metrics(pred, targets.cpu())
-                print(f"Sample {i}: MSE = {mse:.4f}, PSNR = {psnr:.2f} dB")
-                all_metrics.append((mse, psnr))
-            
-            # For all samples, calculate metrics
-            trajectory = run_trajectory_inference(model, inputs, steps=100, device=device)
-            pred = trajectory[-1]
-            mse, psnr = calculate_metrics(pred, targets.cpu())
-            all_metrics.append((mse, psnr))
-            
-            # Save the prediction
-            save_path = os.path.join(save_dir, f"sample_{i}_pred.png")
-            plt.figure(figsize=(15, 5))
-            plt.subplot(131)
-            plt.imshow(inputs.cpu().numpy()[0, 0], cmap='gray')
-            plt.title("Input (MR)")
-            plt.axis('off')
-            
-            plt.subplot(132)
-            plt.imshow(pred.numpy()[0, 0], cmap='gray')
-            plt.title("Prediction (CT)")
-            plt.axis('off')
-            
-            plt.subplot(133)
-            plt.imshow(targets.cpu().numpy()[0, 0], cmap='gray')
-            plt.title("Ground Truth (CT)")
-            plt.axis('off')
-            
-            plt.tight_layout()
-            plt.savefig(save_path)
-            plt.close()
+        if USE_TORCH_DIFFEQ:
+            traj = torchdiffeq.odeint(
+                lambda t, x: model(image=inputs, x=x, pred_type="denoise", step=t),
+                torch.randn(batch_size, 1, 256, 256, device=device),
+                torch.linspace(0, 1, 5, device=device),
+                atol=1e-4,
+                rtol=1e-4,
+                method="dopri5",
+            )
+        else:
+            traj = model(image=inputs, x=torch.randn(batch_size, 1, 256, 256, device=device),
+                         pred_type="denoise", step=1.0)
+
     
-    # Calculate and report average metrics
-    mse_values, psnr_values = zip(*all_metrics)
-    avg_mse = np.mean(mse_values)
-    avg_psnr = np.mean(psnr_values)
+    final_traj = traj[-1]  # shape: (batch_size, 1, 256, 256)
+    numpy_array = final_traj.cpu().numpy().squeeze(1)
+
     
-    print("\n==== Evaluation on Radio_val dataset ====")
-    print(f"Average MSE: {avg_mse:.4f}")
-    print(f"Average PSNR: {avg_psnr:.2f} dB")
-    
-    # Save metrics to file
-    with open(os.path.join(save_dir, "metrics.txt"), "w") as f:
-        f.write(f"Average MSE: {avg_mse:.4f}\n")
-        f.write(f"Average PSNR: {avg_psnr:.2f} dB\n")
-        f.write("\nIndividual samples:\n")
-        for i, (mse, psnr) in enumerate(all_metrics):
-            f.write(f"Sample {i}: MSE = {mse:.4f}, PSNR = {psnr:.2f} dB\n")
+    num_images = numpy_array.shape[0]
+    rows = int(math.ceil(math.sqrt(num_images)))
+    cols = int(math.ceil(num_images / rows))
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+    if rows == 1 or cols == 1:
+        axes = np.array(axes).reshape(rows, cols)
+
+    index = 0
+    for i in range(rows):
+        for j in range(cols):
+            if index < num_images:
+                axes[i, j].imshow(numpy_array[index], cmap='gray')
+                axes[i, j].axis('off')
+                index += 1
+            else:
+                axes[i, j].axis('off')
+    plt.subplots_adjust(wspace=0.05, hspace=0.05)
+    plt.savefig("traj_final.png", bbox_inches='tight', dpi=300)
+    plt.show()
+    print("轨迹图已保存为 traj_final.png")
+
+    # 在整个 Radio_val 数据集上进行评估
+    print("开始在整个 Radio_val 数据集上评估...")
+    metrics = evaluate_val(model, val_loader, device, use_torch_diffeq=USE_TORCH_DIFFEQ)
+    print("在整个 Radio_val 数据集上的评估指标:")
+    for metric, value in metrics.items():
+        print(f"{metric}: {value:.4f}")
 
 if __name__ == "__main__":
     main()
