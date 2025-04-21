@@ -17,8 +17,208 @@ warnings.filterwarnings("ignore")
                  #dir_gainIRT2cars="gain/carsIRT2/", 
                  #dir_buildings="png/", 
                  #dir_antenna= , 
-                    
 
+class RadioMap3Dset(Dataset):
+    """Modified RadioMapTestset to align with RadioUNet_c logic"""
+    def __init__(self, maps_inds=np.zeros(1), phase="train",
+                 ind1=0, ind2=0, 
+                 dir_dataset="./RadioMap3DSeer/",
+                 numTx=80,                  
+                 thresh=0.2,
+                 cityMap="complete",
+                 transform=transforms.ToTensor()):
+        """
+        Args:
+            maps_inds: optional shuffled sequence of the maps. Leave it as maps_inds=0 (default) for the standard split.
+            phase: "train", "val", "test", "custom". If "train", "val" or "test", uses a standard split.
+                   "custom" means the loader will read maps ind1 to ind2 from the list maps_inds.
+            ind1, ind2: First and last indices from maps_inds to define the maps of the loader, in case phase="custom".
+            dir_dataset: directory of the RadioMap3DSeer dataset.
+            numTx: Number of transmitters per map. Default and maximal value of numTx = 80.                 
+            thresh: Pathloss threshold between 0 and 1. Default is 0.2.
+            simulation: "DPM" for now (can be extended like RadioUNet_c if needed).
+            cityMap: "complete" or "height". Use complete city map or height-based map. Default="height".
+            transform: Transform to apply on the images of the loader. Default=transforms.ToTensor().
+        Output:
+            inputs: The RadioUNet-compatible inputs (buildings + Tx).
+            image_gain: Ground truth radio map.
+            name1: File name for reference (map index).
+        """
+        
+        # Handle map indices and phase logic (aligned with RadioUNet_c)
+        if maps_inds.size == 1:
+            self.maps_inds = np.arange(0, 700, 1, dtype=np.int16)
+            # Deterministic "random" shuffle of the maps (same as RadioUNet_c)
+            np.random.seed(42)
+            np.random.shuffle(self.maps_inds)
+        else:
+            self.maps_inds = maps_inds
+            
+        if phase == "train":
+            self.ind1 = 0
+            self.ind2 = 500
+        elif phase == "val":
+            self.ind1 = 501
+            self.ind2 = 600
+        elif phase == "test":
+            self.ind1 = 0
+            self.ind2 = 83
+        else:  # custom range
+            self.ind1 = ind1
+            self.ind2 = ind2
+
+        self.dir_dataset = dir_dataset
+        self.numTx = numTx                
+        self.thresh = thresh 
+        self.cityMap = cityMap
+
+        # Set directories based on cityMap (aligned with original RadioMapTestset)
+        if cityMap == "complete":
+            self.dir_buildings = os.path.join(self.dir_dataset, "png/buildings_complete/")
+        elif cityMap == "height":
+            self.dir_buildings = os.path.join(self.dir_dataset, "png/buildingsWHeight/")
+
+        # Set transmitter (Tx) directory (aligned with original RadioMapTestset)
+        self.dir_Tx = os.path.join(self.dir_dataset, "png/antennasWHeight/")  # Default to height for now
+
+        # Ground truth gain directory
+        self.dir_gain = os.path.join(self.dir_dataset, "gain/")
+
+        self.transform = transform
+        self.height = 256
+        self.width = 256
+
+    def __len__(self):
+        return (self.ind2 - self.ind1 + 1) * self.numTx
+    
+    def __getitem__(self, idx):
+        # Compute map and Tx indices (aligned with RadioUNet_c)
+        idxr = np.floor(idx / self.numTx).astype(int)
+        idxc = idx - idxr * self.numTx 
+        dataset_map_ind = self.maps_inds[idxr + self.ind1]  # Use maps_inds like RadioUNet_c
+
+        # File names (aligned with RadioUNet_c naming convention)
+        name1 = str(dataset_map_ind) + ".png"  # Map-dependent file name
+        name2 = str(dataset_map_ind) + "_" + str(idxc) + ".png"  # Map + Tx dependent file name
+        
+        # Load buildings
+        img_name_buildings = os.path.join(self.dir_buildings, name1)
+        image_buildings = np.asarray(io.imread(img_name_buildings))   
+        
+        # Load Tx (transmitter)
+        img_name_Tx = os.path.join(self.dir_Tx, name2)
+        image_Tx = np.asarray(io.imread(img_name_Tx))
+        
+        # Load radio map (ground truth gain)
+        img_name_gain = os.path.join(self.dir_gain, name2)  
+        image_gain = np.expand_dims(np.asarray(io.imread(img_name_gain)), axis=2) / 255
+
+        # Pathloss threshold transform (aligned with RadioUNet_c)
+        if self.thresh > 0:
+            mask = image_gain < self.thresh
+            image_gain[mask] = self.thresh
+            image_gain = image_gain - self.thresh * np.ones(np.shape(image_gain))
+            image_gain = image_gain / (1 - self.thresh)
+
+        # Stack inputs (buildings + Tx, aligned with RadioUNet_c)
+        inputs = np.stack([image_buildings, image_Tx], axis=2) 
+
+        # Apply transform if provided
+        if self.transform:
+            inputs = self.transform(inputs).type(torch.float32)
+            image_gain = self.transform(image_gain).type(torch.float32)
+
+        # Return format aligned with RadioUNet_c: (inputs, image_gain, name1)
+        return (inputs, image_gain, name1)
+
+
+class RadioMapTestset(Dataset):
+
+    def __init__(self,
+                 ind1=0,ind2=83, 
+                 input_dir="./RadioMapChallenge_Test/png/",
+                 gt_dir="./RadioMapChallenge_Test/gain/",
+                 numTx=80,                  
+                 antenna = 'height',
+                 cityMap="height",
+                 transform= transforms.ToTensor()):
+
+        
+        self.ind1=ind1
+        self.ind2=ind2
+        
+        self.numTx = numTx 
+        
+        self.input_dir = input_dir
+        self.dir_gain=gt_dir
+        
+        # set buildings directory
+        self.cityMap=cityMap
+        if cityMap=="complete":
+            self.dir_buildings=os.path.join(self.input_dir, "buildings_complete/")
+        elif cityMap=='height':
+            self.dir_buildings = os.path.join(self.input_dir, "buildingsWHeight/")
+        
+        # set antenna directory
+        self.antenna=antenna
+        if antenna=='complete':
+            self.dir_Tx = os.path.join(self.input_dir, "antennas/")
+        elif antenna=='height':
+            self.dir_Tx = os.path.join(self.input_dir, "antennasWHeight/")
+        elif antenna=='building':
+            self.dir_Tx = os.path.join(self.input_dir, "antennasBuildings/")
+
+        self.transform= transform
+        
+        self.height = 256
+        self.width = 256
+
+        
+    def __len__(self):
+        return (self.ind2-self.ind1+1)*self.numTx
+    
+    def __getitem__(self, idx):
+        
+        idxr=np.floor(idx/self.numTx).astype(int)
+        idxc=idx-idxr*self.numTx 
+        dataset_map_ind=idxr+self.ind1
+        #names of files that depend only on the map:
+        building_name = str(dataset_map_ind)
+        Tx_name = str(idxc)
+        name1 = building_name + ".png"
+        #names of files that depend on the map and the Tx:
+        name2 = building_name + "_" + Tx_name + ".png"
+        
+        #Load buildings:
+
+        img_name_buildings = os.path.join(self.dir_buildings, name1)
+        image_buildings = np.asarray(io.imread(img_name_buildings))   
+        
+        #Load Tx (transmitter):
+        img_name_Tx = os.path.join(self.dir_Tx, name2)
+        image_Tx = np.asarray(io.imread(img_name_Tx))
+        
+        #Load radio map:
+
+        img_name_gain = os.path.join(self.dir_gain, name2)  
+        image_gain = np.expand_dims(np.asarray(io.imread(img_name_gain)),axis=2)/255
+
+        # Building complete for post processing
+        self.post_buildings=os.path.join(self.input_dir, "buildings_complete/")
+        build_comp_name = os.path.join(self.post_buildings, name1)
+        build_comp = np.asarray(io.imread(build_comp_name))   
+
+        inputs=np.stack([image_buildings, image_Tx], axis=2) 
+
+        if self.transform:
+            inputs = self.transform(inputs).type(torch.float32)
+            image_gain = self.transform(image_gain).type(torch.float32)
+            build_comp = self.transform(build_comp).type(torch.float32)
+            #note that ToTensor moves the channel from the last asix to the first!
+
+
+        return [inputs, image_gain, build_comp, building_name, Tx_name]
+             
 class RadioUNet_c(Dataset):
     """RadioMapSeer Loader for accurate buildings and no measurements (RadioUNet_c)"""
     def __init__(self,maps_inds=np.zeros(1), phase="train",
@@ -91,9 +291,9 @@ class RadioUNet_c(Dataset):
         self.carsInput=carsInput
         if simulation=="DPM" :
             if carsSimul=="no":
-                self.dir_gain=self.dir_dataset+"gain/DPM/"
+                self.dir_gain=self.dir_dataset+"gain/"
             else:
-                self.dir_gain=self.dir_dataset+"gain/carsDPM/"
+                self.dir_gain=self.dir_dataset+"gain/"
         elif simulation=="IRT2":
             if carsSimul=="no":
                 self.dir_gain=self.dir_dataset+"gain/IRT2/"
@@ -203,10 +403,6 @@ class RadioUNet_c(Dataset):
 
 
         return (inputs, image_gain, name1)
-    
-    
-    
-    
 
 class RadioUNet_c_sprseIRT4(Dataset):
     """RadioMapSeer Loader for accurate buildings and no measurements (RadioUNet_c)"""
@@ -827,12 +1023,3 @@ class RadioUNet_s_sprseIRT4(Dataset):
 
 
         return [inputs, image_gain, name1]
-    
-    
-
-    
-
-    
-    
-    
-    
