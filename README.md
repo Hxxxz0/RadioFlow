@@ -10,30 +10,18 @@
 </p>
 
 ---
-
 ## ✨ Why RadioFlow?
 
-| ⚡ Metric | **RadioFlow** | RadioDiff | RadioUNet |
-|-----------|---------------|-----------|-----------|
-| **Params** | **3 M (Lite) / 53 M (Large)** | 111 M | 27 M |
-| **Inference** | **0.06 s (Lite) / 0.13 s (Large)** | 0.60 s | 0.06 s |
-| **PSNR (SRM)** | **39.8 dB** | 35.1 dB | 32.0 dB |
+RadioFlow is a lightweight, ultra-fast generative model tailored for high-fidelity radio map construction. Compared to existing baselines like diffusion-based and UNet-based methods, it delivers significantly better visual quality, drastically reduced inference time, and an exceptionally compact model size—especially with the edge-friendly **RadioFlow-Lite** variant. Powered by **Conditional Flow Matching**, **spatial attention UNet**, and **classifier-free guidance**, it achieves state-of-the-art performance with a single-step ODE solver, completely bypassing the costly iterative denoising used in diffusion models.
 
-* RadioFlow hits **state‑of‑the‑art accuracy while slashing parameters by ≈ 30× and inference time by ≈ 10×** versus diffusion baselines Radio_Flow-4(1).pdf](file-service://file-NicsRkHMaxWavkMsFcrezf).  
-* Powered by **Conditional Flow‑Matching (CFM)** – deterministic ODE sampling means **single‑step generation**, no iterative denoising loops Radio_Flow-4(1).pdf](file-service://file-NicsRkHMaxWavkMsFcrezf).  
-* **Spatial‑attention UNet + Classifier‑Free Guidance** for crystal‑clear details and robust generalization Radio_Flow-4(1).pdf](file-service://file-NicsRkHMaxWavkMsFcrezf).  
-* **RadioFlow‑Lite** squeezes into **3.9 M parameters** for edge devices with only a marginal drop in fidelity Radio_Flow-4(1).pdf](file-service://file-NicsRkHMaxWavkMsFcrezf).  
+The framework features a modular design with:
+- 🧱 Flexible UNet-based architecture and attention modules  
+- 🧠 A training pipeline supporting mixed precision, EMA, and real-time visualization  
+- ⚙️ RadioFlow can be seamlessly scaled down to a lightweight version for edge and embedded devices
 
----
+▶️ **[Download Pretrained Checkpoints (BaiduNetDisk)](https://pan.baidu.com/s/1uuIglmtNukc6_RjFsE7Z_w?pwd=n8f4)**
 
-## 🗺️ What’s Inside?
-
-* **`model/`** Lightweight UNet back‑bone with conditional embeddings & CBAM attention.  
-* **`data_loaders/`** Flexible loaders for static (SRM) & dynamic (DRM) RadioMapSeer splits.  
-* **`train.py`** One‑command training harness with mixed‑precision & EMA.  
-* **`test.py` / `viz.py`** Evaluation + gorgeous heat‑map visualizations.  
-* **`Compare_Results/`** Pre‑computed reconstructions & metrics table.  
-
+> *From noise to signal map in just one deterministic step.* 🚀
 ---
 
 ## 🚀 Quick Start
