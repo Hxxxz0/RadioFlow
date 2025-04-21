@@ -1,7 +1,7 @@
 # RadioFlow 🚀📡  
 *Flow‑Matching for Lightning‑Fast, High‑Fidelity Radio‑Map Generation*
 
-![banner](docs/teaser_radioflow.png)
+![banner](docs/RadioFlow_model.png)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Flow‑Matching-%F0%9F%94%A5-red">
@@ -38,5 +38,17 @@ The framework features a modular design with:
 
 
 ## 📊 Visual Gallery
+| DRM Flow (ours) vs RadioUNet | SRM Flow (ours) vs RadioUNet |
+|:----------------------------:|:----------------------------:|
+| ![DRM](Compare_Results/DRM_flow_unet_comparison.png) | ![SRM](Compare_Results/SRM_flow_unet_comparison.png) |
+| *Fig. 1: DRM Flow comparison* | *Fig. 2: SRM Flow comparison* |
+
+| DRM Task: CFG Scale Comparison                                          | SRM Task: CFG Scale Comparison                                          |
+|:------:|:-------:|
+| ![DRM Ablation](Compare_Results/RadioFlow_cfg_drm_comparison.png)       | ![SRM Ablation](Compare_Results/RadioFlow_cfg_srm_comparison.png)       |
+| *Fig. 3: DRM map outputs under different CFG scale settings*            | *Fig. 4: SRM map outputs under different CFG scale settings*            |
 
 
+![Model Performance Comparison](Compare_Results/Model_Performance_Comparison.png)
+
+*Fig. 5: Quantitative comparison of NMSE, PSNR, RMSE, Time,and Params for RadioFlow against other methods.*  
