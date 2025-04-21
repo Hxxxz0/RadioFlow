@@ -23,11 +23,47 @@ The framework features a modular design with:
 
 > *From noise to signal map in just one deterministic step.* 🚀
 ---
-
 ## 🚀 Quick Start
 
+### 1. Dataset
 
+- **RadioMapSeer**  
+  [Download link](https://radiomapseer.github.io/)
 
+- **RadioMap3DSeer**  
+  [Download link](https://drive.google.com/file/d/1YW3RyM9KYBe110CXC5aZJJ0MAIti65bY/view)
+
+### 2. Training
+
+1. Open `config.py` and set:
+   - `data_dir`: path to your dataset
+   - training hyperparameters (e.g., learning rate, batch size, number of epochs)
+2. Choose the appropriate data loader:
+   - `RadioUNet_c` for the RadioMapSeer dataset  
+   - `RadioMap3Dset` for the RadioMap3DSeer dataset
+3. Launch training:
+   ```bash
+   python train.py
+   ```
+
+### 3. Testing
+
+- **DRM evaluation:**
+  ```bash
+  python test.py --task drm
+  ```
+- **SRM evaluation:**
+  ```bash
+  python test.py --task srm
+  ```
+
+### 4. Visualization
+
+1. In `config.py`, configure the `VizConfig` class to specify visualization options.
+2. Run the visualization script:
+   ```bash
+   python viz.py
+   ```
 ## 📝 Reproducing Paper Results
 
 | 🧪 Task | 📉 NMSE ↓ | 🔊 PSNR ↑ | 📏 RMSE ↓ | 🧠 SSIM ↑ |
