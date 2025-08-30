@@ -50,11 +50,11 @@ The framework features a modular design with:
 
 - **DRM evaluation:**
   ```bash
-  python test.py --task drm
+  python test.py --checkpoint 'Your/Path' --task drm
   ```
 - **SRM evaluation:**
   ```bash
-  python test.py --task srm
+  python test.py --checkpoint 'Your/Path' --task srm
   ```
 
 ### 4. Visualization
