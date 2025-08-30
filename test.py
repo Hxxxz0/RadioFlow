@@ -93,7 +93,7 @@ def evaluate(model, loader, device, use_ode: bool, save_dir: str):
             else:
                 pred = model(image=inputs,
                              x=torch.randn(bsz, 1, Config.img_size, Config.img_size, device=device),
-                             pred_type="denoise", step=1.0)
+                             pred_type="denoise", step=torch.tensor(1.0, device=device))
 
             # compute losses
             mse = F.mse_loss(pred, targets)
@@ -143,11 +143,11 @@ def load_model_from_ckpt(model, path, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['drm','srm'], required=True,
+    parser.add_argument('--task', choices=['drm','srm'], default=Config.task,
                         help='Which task to evaluate')
-    parser.add_argument('--use_ode', action='store_true', help='Use ODE solver')
-    parser.add_argument('--checkpoint', type=str, help='Path to model checkpoint')
-    parser.add_argument('--output_dir', type=str, default='results', help='Where to save outputs')
+    parser.add_argument('--use_ode', action='store_true', default=Config.use_ode, help='Use ODE solver')
+    parser.add_argument('--checkpoint', type=str, default=Config.checkpoint, help='Path to model checkpoint')
+    parser.add_argument('--output_dir', type=str, default=Config.output_dir, help='Where to save outputs')
     args = parser.parse_args()
 
     # pick config based on task
@@ -160,7 +160,8 @@ def main():
         phase='test',
         carsSimul=(cfg.cars_simul if args.task=='drm' else 'no'),
         carsInput=(cfg.cars_input if args.task=='drm' else 'no'),
-        dir_dataset=cfg.data_dir
+        dir_dataset=cfg.data_dir,
+        simulation=cfg.simulation
     )
     loader = torch.utils.data.DataLoader(dataset,
                                          batch_size=cfg.batch_size,
@@ -172,7 +173,7 @@ def main():
     model.to(device)
 
     # load weights
-    ckpt = args.checkpoint or (cfg.drm_ckpt if args.task=='drm' else cfg.srm_ckpt)
+    ckpt = args.checkpoint 
     load_model_from_ckpt(model, ckpt, device)
 
     # eval
