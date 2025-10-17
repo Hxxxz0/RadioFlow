@@ -16,8 +16,8 @@ class Config:
     
     batch_size = 64
     num_workers = 64
-    cars_simul = "yes"  # "yes" or "no" flag for car simulation
-    cars_input = "yes"  # "yes" or "no" flag for car input
+    cars_simul = "no"  # "yes" or "no" flag for car simulation
+    cars_input = "no"  # "yes" or "no" flag for car input
     simulation = "DPM"  # Dataset simulation type
 
     # Training settings

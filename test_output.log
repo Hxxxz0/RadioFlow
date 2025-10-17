@@ -1,0 +1,6 @@
+Device: cuda
+./RadioMapSeer/png/buildings_complete/
+BasicUNet features: (128, 128, 256, 512, 1024, 128).
+BasicUNet features: (128, 128, 256, 512, 1024, 128).
+Loaded checkpoint: SRM_Large.pt
+Evaluating:   0%|          | 0/124 [00:00<?, ?it/s]

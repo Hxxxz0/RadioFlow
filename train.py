@@ -204,28 +204,53 @@ class AdvancedTrainer:
 if __name__ == '__main__':
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Train RadioFlow model')
-    parser.add_argument('--model_size', type=str, default=None, 
+    parser.add_argument('--task', choices=['drm','srm'], default=Config.task,
+                        help='Task to train: drm or srm')
+    parser.add_argument('--model_size', type=str, default=None,
                         choices=['lite', 'large'],
                         help='Model size: lite or large (default: use config value)')
     args = parser.parse_args()
     
     cfg = Config()
-    
-    # Override model_size if provided via command line
+
+    # Override task and model_size if provided via command line
+    if args.task:
+        cfg.task = args.task
+        print(f"Using task: {cfg.task}")
     if args.model_size:
         cfg.model_size = args.model_size
         print(f"Using model size: {cfg.model_size}")
-    
+
+    # Set task-specific configurations
+    if cfg.task == 'drm':
+        cfg.con_channels = 3
+        cfg.cars_simul = "yes"
+        cfg.cars_input = "yes"
+        cfg.save_dir = f"checkpoints/cfm_DRM_{cfg.model_size.title()}"
+        cfg.checkpoint = f'DRM_{cfg.model_size.title()}.pt'
+    else:  # srm
+        cfg.con_channels = 2
+        cfg.cars_simul = "no"
+        cfg.cars_input = "no"
+        cfg.save_dir = f"checkpoints/cfm_SRM_{cfg.model_size.title()}"
+        cfg.checkpoint = f'SRM_{cfg.model_size.title()}.pt'
+
+    print(f"Input channels: {cfg.con_channels}")
+    print(f"Save directory: {cfg.save_dir}")
+    print(f"Checkpoint: {cfg.checkpoint}")
+
     os.makedirs(cfg.save_dir, exist_ok=True)
 
     # Prepare datasets and loaders
     train_ds = RadioUNet_c(
         phase='train', carsSimul=cfg.cars_simul,
-        carsInput=cfg.cars_input, dir_dataset=cfg.data_dir
+        carsInput=cfg.cars_input, dir_dataset=cfg.data_dir,
+        simulation=cfg.simulation
     )
     val_ds = RadioUNet_c(
         phase='val', carsSimul=cfg.cars_simul,
-        carsInput=cfg.cars_input, dir_dataset=cfg.data_dir
+        carsInput=cfg.cars_input, dir_dataset=cfg.data_dir,
+        simulation=cfg.simulation
     )
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
     val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
@@ -233,6 +258,7 @@ if __name__ == '__main__':
     # Device and model setup
     device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    print(f"Task: {cfg.task}")
     model = DiffUNet(con_channels=cfg.con_channels, model_size=cfg.model_size)
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
