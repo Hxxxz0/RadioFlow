@@ -291,9 +291,9 @@ class RadioUNet_c(Dataset):
         self.carsInput=carsInput
         if simulation=="DPM" :
             if carsSimul=="no":
-                self.dir_gain=self.dir_dataset+"gain/"
+                self.dir_gain=self.dir_dataset+"gain/DPM/"
             else:
-                self.dir_gain=self.dir_dataset+"gain/"
+                self.dir_gain=self.dir_dataset+"gain/carsDPM/"
         elif simulation=="IRT2":
             if carsSimul=="no":
                 self.dir_gain=self.dir_dataset+"gain/IRT2/"

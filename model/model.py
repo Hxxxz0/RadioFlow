@@ -38,25 +38,39 @@ num_gpus = 1
 device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 class DiffUNet(nn.Module):
-    def __init__(self,con_channels=2) -> None:
+    def __init__(self, con_channels=2, model_size='lite') -> None:
+        """
+        Initialize DiffUNet model.
+        
+        Args:
+            con_channels: Number of input condition channels
+            model_size: Model size, either 'lite' or 'large'
+        """
         super().__init__()
+        
+        # Import MODEL_FEATURES from config
+        from config import MODEL_FEATURES
+        
+        # Get features based on model size
+        if model_size not in MODEL_FEATURES:
+            raise ValueError(f"model_size must be 'lite' or 'large', got {model_size}")
+        features = MODEL_FEATURES[model_size]
+        
         self.embed_model = BasicUNetEncoder(
-            spatial_dims=2,           # 2D 图像
-            in_channels=con_channels,            # 输入通道数为2
-            out_channels=32,          # 输出通道数为32
-            features=[128, 128, 256,512 , 1024, 128],#(32, 32, 64, 128, 256, 32),
-            #features=(32, 32, 64, 128, 256, 32),
+            spatial_dims=2,           # 2D image
+            in_channels=con_channels,
+            out_channels=features[0],  # Use first feature as out_channels
+            features=features,
             act=("LeakyReLU", {"negative_slope": 0.1, "inplace": True}),
             norm=("instance", {"affine": True}),
             bias=True
         )
 
         self.model = BasicUNetDe(
-            spatial_dims=2,           # 2D 图像
-            in_channels=con_channels+1,            # 修改输入通道数为2
-            out_channels=1,           # 输出通道数为1
-            features=[128, 128, 256,512 , 1024, 128],#(32, 32, 64, 128, 256, 32),
-            #features=(32, 32, 64, 128, 256, 32),
+            spatial_dims=2,           # 2D image
+            in_channels=con_channels+1,
+            out_channels=1,
+            features=features,
             act=("LeakyReLU", {"negative_slope": 0.1, "inplace": False}),
             norm=("instance", {"affine": True}),
             bias=True,

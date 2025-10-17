@@ -4,6 +4,7 @@ Unified training script for both DRM and SRM tasks.
 import os
 import time
 import copy
+import argparse
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -201,7 +202,20 @@ class AdvancedTrainer:
 
 
 if __name__ == '__main__':
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train RadioFlow model')
+    parser.add_argument('--model_size', type=str, default=None, 
+                        choices=['lite', 'large'],
+                        help='Model size: lite or large (default: use config value)')
+    args = parser.parse_args()
+    
     cfg = Config()
+    
+    # Override model_size if provided via command line
+    if args.model_size:
+        cfg.model_size = args.model_size
+        print(f"Using model size: {cfg.model_size}")
+    
     os.makedirs(cfg.save_dir, exist_ok=True)
 
     # Prepare datasets and loaders
@@ -219,7 +233,7 @@ if __name__ == '__main__':
     # Device and model setup
     device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    model = DiffUNet(con_channels=cfg.con_channels)
+    model = DiffUNet(con_channels=cfg.con_channels, model_size=cfg.model_size)
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
     model.to(device)
