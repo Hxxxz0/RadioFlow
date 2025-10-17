@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://arxiv.org/pdf/2510.09314"><img src="https://img.shields.io/badge/arXiv-2510.09314-b31b1b.svg" alt="arXiv"></a>
-  <a href="https://pan.baidu.com/s/1uuIglmtNukc6_RjFsE7Z_w?pwd=n8f4"><img src="https://img.shields.io/badge/Checkpoints-BaiduNetDisk-blue.svg" alt="Checkpoints"></a>
 </p>
 
 ---
@@ -26,8 +25,7 @@ The framework features a modular design with:
 
 > *From noise to signal map in just one deterministic step.* 🚀
 
-📄 **Paper:** [arXiv:2510.09314](https://arxiv.org/pdf/2510.09314)  
-📦 **Checkpoints:** [BaiduNetDisk](https://pan.baidu.com/s/1uuIglmtNukc6_RjFsE7Z_w?pwd=n8f4)
+📄 **Paper:** [arXiv:2510.09314](https://arxiv.org/pdf/2510.09314)
 ---
 ## 🚀 Quick Start
 
@@ -45,6 +43,8 @@ pip install -r requirements.txt
 
 - **RadioMap3DSeer**  
   [Download link](https://drive.google.com/file/d/1YW3RyM9KYBe110CXC5aZJJ0MAIti65bY/view)
+
+**Pretrained checkpoints:** [BaiduNetDisk](https://pan.baidu.com/s/1uuIglmtNukc6_RjFsE7Z_w?pwd=n8f4)
 
 ### 3. Training
 
