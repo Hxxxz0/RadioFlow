@@ -1,0 +1,4 @@
+*.pt
+RadioMapSeer/
+results/
+__pycache__/
