@@ -209,9 +209,16 @@ if __name__ == '__main__':
     parser.add_argument('--model_size', type=str, default=None,
                         choices=['lite', 'large'],
                         help='Model size: lite or large (default: use config value)')
+    parser.add_argument('--gpu', type=str, default=None,
+                        help='GPU device id to use (e.g., "0" or "0,1,2"). If not specified, uses all available GPUs.')
     args = parser.parse_args()
     
     cfg = Config()
+
+    # Set GPU devices if specified
+    if args.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+        print(f"Using GPU(s): {args.gpu}")
 
     # Override task and model_size if provided via command line
     if args.task:
